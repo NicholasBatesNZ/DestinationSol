@@ -43,8 +43,10 @@ import org.terasology.util.io.FilesUtil;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.InputStreamReader;
 import java.io.Reader;
 import java.io.StringReader;
+import java.net.URI;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -64,7 +66,9 @@ public class ModuleManager {
 
         try {
             // Engine module
-            loadModuleToRegistry(Paths.get(getClass().getProtectionDomain().getCodeSource().getLocation().toURI()));
+            Path engineClasspath = Paths.get(getClass().getProtectionDomain().getCodeSource().getLocation().toURI());
+            Reader reader = new InputStreamReader(getClass().getResourceAsStream("/module.json"), Charsets.UTF_8);
+            loadModuleToRegistry(engineClasspath, reader);
 
             Path modulesRoot;
             if (DebugOptions.DEV_ROOT_PATH != null) {
@@ -73,15 +77,8 @@ public class ModuleManager {
                 modulesRoot = Paths.get(".").resolve("..").resolve("modules");
             }
 
-            try {
-                for (Path modulePath : java.nio.file.Files.newDirectoryStream(modulesRoot, new FileTypesFilter("jar", "zip"))) {
-                    loadModuleToRegistry(modulePath);
-                }
-                for (Path modulePath : java.nio.file.Files.newDirectoryStream(modulesRoot, FilesUtil.DIRECTORY_FILTER)) {
-                    loadModuleToRegistry(modulePath);
-                }
-            } catch (IOException e) {
-                logger.error("Failed to scan path {}", modulesRoot, e);
+            for (Path modulePath : java.nio.file.Files.newDirectoryStream(modulesRoot, FilesUtil.DIRECTORY_FILTER)) {
+                loadModuleToRegistry(modulePath);
             }
 
             Set<Module> requiredModules = Sets.newHashSet();
@@ -103,17 +100,22 @@ public class ModuleManager {
         try {
             String metadataString = Files.toString(new File(modulePath + "/module.json"), Charsets.UTF_8);
             Reader metadataReader = new StringReader(metadataString);
-            ModuleMetadata metadata = new ModuleMetadataJsonAdapter().read(metadataReader);
-            List<Path> modulePaths = new ArrayList<>();
-            modulePaths.add(Paths.get(modulePath.toUri()));
-            Module module = moduleFactory.createClasspathModule(modulePaths, metadata);
-            if (registry.add(module)) {
-                logger.info("Discovered module: {}", module);
-            } else {
-                logger.info("Discovered duplicate module: {}-{}, skipping", module.getId(), module.getVersion());
-            }
-        } catch (IOException e) {
+            loadModuleToRegistry(modulePath, metadataReader);
+        }
+        catch (IOException e) {
             logger.warn("Failed to load module at '{}'", modulePath, e);
+        }
+    }
+
+    private void loadModuleToRegistry(Path modulePath, Reader metadataReader) {
+        ModuleMetadata metadata = new ModuleMetadataJsonAdapter().read(metadataReader);
+        List<Path> modulePaths = new ArrayList<>();
+        modulePaths.add(Paths.get(modulePath.toUri()));
+        Module module = moduleFactory.createClasspathModule(modulePaths, metadata);
+        if (registry.add(module)) {
+            logger.info("Discovered module: {}", module);
+        } else {
+            logger.info("Discovered duplicate module: {}-{}, skipping", module.getId(), module.getVersion());
         }
     }
 

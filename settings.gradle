@@ -1,4 +1,4 @@
-include 'desktop', 'engine'
+include 'desktop', 'engine', 'modules/MyModule'
 
 File androidGradle = new File(rootDir, 'android/build.gradle')
 if (androidGradle.exists()) {
