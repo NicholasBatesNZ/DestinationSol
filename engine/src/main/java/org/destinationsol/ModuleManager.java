@@ -17,6 +17,7 @@ package org.destinationsol;
 
 import com.google.common.base.Charsets;
 import com.google.common.collect.Sets;
+import com.google.common.io.Files;
 import org.destinationsol.assets.AssetHelper;
 import org.destinationsol.assets.Assets;
 import org.destinationsol.assets.audio.OggMusic;
@@ -34,14 +35,16 @@ import org.terasology.module.ModuleEnvironment;
 import org.terasology.module.ModuleFactory;
 import org.terasology.module.ModuleMetadata;
 import org.terasology.module.ModuleMetadataJsonAdapter;
-import org.terasology.module.ModulePathScanner;
 import org.terasology.module.ModuleRegistry;
 import org.terasology.module.TableModuleRegistry;
 import org.terasology.module.sandbox.StandardPermissionProviderFactory;
+import org.terasology.util.io.FileTypesFilter;
+import org.terasology.util.io.FilesUtil;
 
-import java.io.InputStreamReader;
+import java.io.File;
+import java.io.IOException;
 import java.io.Reader;
-import java.net.URI;
+import java.io.StringReader;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.util.ArrayList;
@@ -53,32 +56,64 @@ public class ModuleManager {
 
     private ModuleEnvironment environment;
     private ModuleRegistry registry;
+    private ModuleFactory moduleFactory;
 
     public ModuleManager() {
-        try {
-            URI engineClasspath = getClass().getProtectionDomain().getCodeSource().getLocation().toURI();
-            Reader reader = new InputStreamReader(getClass().getResourceAsStream("/module.json"), Charsets.UTF_8);
-            ModuleMetadata metadata = new ModuleMetadataJsonAdapter().read(reader);
-            List<Path> paths = new ArrayList<>();
-            paths.add(Paths.get(engineClasspath));
-            Module engineModule = new ModuleFactory().createClasspathModule(paths, metadata);
+        moduleFactory = new ModuleFactory();
+        registry = new TableModuleRegistry();
 
-            registry = new TableModuleRegistry();
+        try {
+            // Engine module
+            loadModuleToRegistry(Paths.get(getClass().getProtectionDomain().getCodeSource().getLocation().toURI()));
+
             Path modulesRoot;
             if (DebugOptions.DEV_ROOT_PATH != null) {
                 modulesRoot = Paths.get(".").resolve("modules");
             } else {
                 modulesRoot = Paths.get(".").resolve("..").resolve("modules");
             }
-            new ModulePathScanner().scan(registry, modulesRoot);
+
+            try {
+                for (Path modulePath : java.nio.file.Files.newDirectoryStream(modulesRoot, new FileTypesFilter("jar", "zip"))) {
+                    loadModuleToRegistry(modulePath);
+                }
+                for (Path modulePath : java.nio.file.Files.newDirectoryStream(modulesRoot, FilesUtil.DIRECTORY_FILTER)) {
+                    loadModuleToRegistry(modulePath);
+                }
+            } catch (IOException e) {
+                logger.error("Failed to scan path {}", modulesRoot, e);
+            }
 
             Set<Module> requiredModules = Sets.newHashSet();
-            requiredModules.add(engineModule);
             requiredModules.addAll(registry);
 
             loadEnvironment(requiredModules);
+
+            Iterable<Class<?>> list = environment.getTypesAnnotatedWith(SolAnnotation.class);
+            logger.info(list.toString());
+            for (Class<?> myClass : list) {
+                myClass.newInstance();
+            }
         } catch (Exception e) {
             e.printStackTrace();
+        }
+    }
+
+    private void loadModuleToRegistry(Path modulePath) {
+        try {
+            String metadataString = Files.toString(new File(modulePath + "/module.json"), Charsets.UTF_8);
+            Reader metadataReader = new StringReader(metadataString);
+            ModuleMetadata metadata = new ModuleMetadataJsonAdapter().read(metadataReader);
+            List<Path> modulePaths = new ArrayList<>();
+            modulePaths.add(Paths.get(modulePath.toUri()));
+            Module module = moduleFactory.createClasspathModule(modulePaths, metadata);
+            if (registry.add(module)) {
+                logger.info("Discovered module: {}", module);
+            } else {
+                logger.info("Discovered duplicate module: {}-{}, skipping", module.getId(), module.getVersion());
+            }
+        } catch (IOException e) {
+            logger.warn("Failed to load module at '{}'", modulePath, e);
         }
     }
 
