@@ -54,6 +54,7 @@ import org.destinationsol.game.ship.SloMo;
 import org.destinationsol.game.ship.hulls.HullConfig;
 import org.destinationsol.mercenary.MercenaryUtils;
 import org.destinationsol.modules.ModuleManager;
+import org.destinationsol.network.NetworkListener;
 import org.destinationsol.ui.DebugCollector;
 import org.destinationsol.ui.TutorialManager;
 import org.destinationsol.ui.UiDrawer;
@@ -101,6 +102,7 @@ public class SolGame {
     private RespawnState respawnState;
     private SortedMap<Integer, List<UpdateAwareSystem>> onPausedUpdateSystems;
     private SortedMap<Integer, List<UpdateAwareSystem>> updateSystems;
+    private NetworkListener networkListener;
 
     public SolGame(String shipName, boolean tut, boolean isNewGame, CommonDrawer commonDrawer, Context context, WorldConfig worldConfig) {
         solApplication = context.get(SolApplication.class);
@@ -196,6 +198,9 @@ public class SolGame {
                 }
             }
         }, 0, 30);
+
+        networkListener = new NetworkListener();
+        networkListener.start();
     }
 
     private void createGame(String shipName, boolean shouldSpawnOnGalaxySpawnPosition) {
@@ -233,6 +238,8 @@ public class SolGame {
     }
 
     public void onGameEnd() {
+        networkListener.interrupt();
+
         // If the hero tries to exit while dead, respawn them first, then save
         if (hero.isDead()) {
             respawn();
